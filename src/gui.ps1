@@ -626,7 +626,8 @@ function Start-hermes-agent-windowsGui {
         }
 
         # Smart visibility: setup button only before Hermes is installed
-        if ($Summary.HermesStatus -and $Summary.HermesStatus.Status -eq 'Installed') {
+        # Get-HermesStatus returns Running, Stopped, or Missing (never Installed)
+        if ($Summary.HermesStatus -and ($Summary.HermesStatus.Status -eq 'Running' -or $Summary.HermesStatus.Status -eq 'Stopped')) {
             $controls.StartSetupButton.Visibility = 'Collapsed'
         }
         else {

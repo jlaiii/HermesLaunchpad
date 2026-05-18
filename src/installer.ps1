@@ -140,7 +140,16 @@ function Install-MissingRequirements {
         $results.Add((Format-StatusResult -Name 'Hermes Install' -Status 'Installed' -Message 'Hermes Agent is already installed inside WSL.'))
     }
 
-    $results.Add((Get-HermesGatewayStatus))
+    # Enable Gateway if it is not running (Hermes TUI cannot run headless)
+    $gatewayStatus = Get-HermesGatewayStatus
+    if ($gatewayStatus.Status -eq 'Stopped' -or $gatewayStatus.Status -eq 'Missing') {
+        Write-Log -Message 'Hermes Gateway is not running. Enabling now.' -Level 'INFO' -LogFile $logFile | Out-Null
+        $results.Add((Enable-HermesGateway))
+    }
+    else {
+        $results.Add($gatewayStatus)
+    }
+
     $errorCount = @($results | Where-Object { $_.Status -eq 'Error' }).Count
     return [pscustomobject]@{
         Status   = if ($errorCount -gt 0) { 'Error' } else { 'Installed' }

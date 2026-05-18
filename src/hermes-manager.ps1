@@ -33,7 +33,17 @@ function Test-HermesInstalled {
     }
 
     $result = Invoke-HermesWslCommand -Command 'command -v hermes' -AsAdminUser -TimeoutSeconds 30
-    return ($result.Status -eq 'Success' -and $result.Details)
+    if ($result.Status -ne 'Success' -or -not $result.Details) {
+        return $false
+    }
+
+    # Verify the binary actually works, not just that a wrapper script exists
+    $versionResult = Invoke-HermesWslCommand -Command 'hermes --version 2>/dev/null || echo "HERMES_BINARY_BROKEN"' -AsAdminUser -TimeoutSeconds 30
+    if ($versionResult.Status -eq 'Success' -and $versionResult.Details -and $versionResult.Details -notmatch 'HERMES_BINARY_BROKEN|No such file|not found') {
+        return $true
+    }
+
+    return $false
 }
 
 function Get-HermesVersion {
@@ -95,11 +105,91 @@ function Install-HermesAgent {
         return Format-StatusResult -Name 'Hermes Install' -Status 'Installed' -Message 'Hermes Agent was installed inside WSL.' -Details $result.Details
     }
 
+    # The upstream installer may have created a broken partial install (e.g. shim exists but venv is incomplete).
+    # Run our non-interactive fallback to rebuild from scratch.
     if (Test-HermesInstalled) {
         return Format-StatusResult -Name 'Hermes Install' -Status 'Installed' -Message 'Hermes Agent was found after installer returned an error.' -Details $result.Details
     }
 
-    return Format-StatusResult -Name 'Hermes Install' -Status 'Error' -Message 'Hermes Agent installation in WSL failed.' -Details $result.Details -ExitCode $result.ExitCode
+    Write-Log -Message 'Upstream installer did not produce a working hermes binary. Running safe non-interactive fallback rebuild.' -Level 'WARN' -LogFile $logFile | Out-Null
+    $fallbackScript = @'
+set -e
+HERMES_DIR="$HOME/.hermes/hermes-agent"
+BACKUP_DIR="$HOME/.hermes/hermes-agent-backup-$(date +%Y%m%d%H%M%S)"
+
+# Backup existing config and .env so they survive the reinstall
+if [ -f "$HERMES_DIR/.env" ]; then
+    mkdir -p "$BACKUP_DIR"
+    cp "$HERMES_DIR/.env" "$BACKUP_DIR/"
+fi
+if [ -f "$HOME/.hermes/config.yaml" ]; then
+    mkdir -p "$BACKUP_DIR"
+    cp "$HOME/.hermes/config.yaml" "$BACKUP_DIR/"
+fi
+
+# Remove stale checkout and clone fresh
+rm -rf "$HERMES_DIR"
+mkdir -p "$HERMES_DIR"
+cd "$HERMES_DIR"
+
+git clone --depth 1 --branch main https://github.com/NousResearch/hermes-agent.git "$HERMES_DIR-temp" 2>/dev/null || {
+    echo "ERROR: git clone failed. Check network connectivity."
+    exit 1
+}
+mv "$HERMES_DIR-temp"/* "$HERMES_DIR/" 2>/dev/null || true
+mv "$HERMES_DIR-temp"/.* "$HERMES_DIR/" 2>/dev/null || true
+rmdir "$HERMES_DIR-temp" 2>/dev/null || true
+cd "$HERMES_DIR"
+
+# Rebuild venv with pip-based install (avoids uv sync entry-point issues)
+if command -v uv &>/dev/null; then
+    export UV_NO_CONFIG=1
+    uv venv venv --python 3.11 2>&1
+    venv_python="$HERMES_DIR/venv/bin/python"
+    "$venv_python" -m ensurepip --upgrade 2>&1 || true
+    "$HERMES_DIR/venv/bin/pip" install -e ".[all]" 2>&1
+elif command -v python3 &>/dev/null; then
+    python3 -m venv venv 2>&1
+    "$HERMES_DIR/venv/bin/python" -m ensurepip --upgrade 2>&1
+    "$HERMES_DIR/venv/bin/pip" install -e ".[all]" 2>&1
+else
+    echo "ERROR: Neither uv nor python3 available to create venv."
+    exit 1
+fi
+
+# Verify the install actually worked
+if ! "$HERMES_DIR/venv/bin/python" -m hermes_cli.main --version >/dev/null 2>&1; then
+    echo "ERROR: Package install succeeded but hermes_cli module is not importable."
+    exit 1
+fi
+
+# Restore backed-up config
+if [ -d "$BACKUP_DIR" ]; then
+    [ -f "$BACKUP_DIR/.env" ] && cp "$BACKUP_DIR/.env" "$HERMES_DIR/.env"
+    [ -f "$BACKUP_DIR/config.yaml" ] && cp "$BACKUP_DIR/config.yaml" "$HOME/.hermes/config.yaml"
+    echo "Config restored from backup."
+fi
+
+# Re-create the ~/.local/bin/hermes shim (always use python module for reliability)
+mkdir -p "$HOME/.local/bin"
+cat > "$HOME/.local/bin/hermes" <<'SHIM'
+#!/usr/bin/env bash
+unset PYTHONPATH
+unset PYTHONHOME
+SHIM_HERMES_DIR="$HOME/.hermes/hermes-agent"
+exec "$SHIM_HERMES_DIR/venv/bin/python" -m hermes_cli.main "$@"
+SHIM
+chmod +x "$HOME/.local/bin/hermes"
+
+echo "Reinstall complete."
+'@
+    $fallbackResult = Invoke-HermesWslCommand -Command $fallbackScript -AsAdminUser -TimeoutSeconds 900
+
+    if ((Test-HermesInstalled)) {
+        return Format-StatusResult -Name 'Hermes Install' -Status 'Installed' -Message 'Hermes Agent was rebuilt and installed via fallback.' -Details $fallbackResult.Details
+    }
+
+    return Format-StatusResult -Name 'Hermes Install' -Status 'Error' -Message 'Hermes Agent installation in WSL failed. Both upstream installer and fallback rebuild failed.' -Details "Upstream: $($result.Details)`nFallback: $($fallbackResult.Details)" -ExitCode $fallbackResult.ExitCode
 }
 
 function Update-HermesAgent {
@@ -147,14 +237,10 @@ if [ -d "$HOME/.hermes/hermes-agent/.git" ]; then
         echo "In-place update complete."
     elif command -v uv &>/dev/null; then
         echo "pip install failed (exit $pip_exit), trying uv..."
-        # uv sync with the lockfile is the installer default; tell uv which env to target
-        if [ -f "uv.lock" ]; then
-            UV_PROJECT_ENVIRONMENT="$HOME/.hermes/hermes-agent/venv" uv sync --extra all --locked 2>&1
-            uv_exit=$?
-        else
-            uv pip install -e ".[all]" 2>&1
-            uv_exit=$?
-        fi
+        # uv sync does not always install setuptools entry points.
+        # Use uv pip install -e for a proper editable install.
+        uv pip install -e ".[all]" 2>&1
+        uv_exit=$?
         if [ $uv_exit -eq 0 ]; then
             echo "In-place update complete via uv."
         else
@@ -165,6 +251,18 @@ if [ -d "$HOME/.hermes/hermes-agent/.git" ]; then
         echo "pip install failed (exit $pip_exit) and uv is not available."
         exit 1
     fi
+
+    # Recreate the ~/.local/bin/hermes shim so it always points to python module
+    mkdir -p "$HOME/.local/bin"
+    cat > "$HOME/.local/bin/hermes" <<'SHIM'
+#!/usr/bin/env bash
+unset PYTHONPATH
+unset PYTHONHOME
+SHIM_HERMES_DIR="$HOME/.hermes/hermes-agent"
+exec "$SHIM_HERMES_DIR/venv/bin/python" -m hermes_cli.main "$@"
+SHIM
+    chmod +x "$HOME/.local/bin/hermes"
+    echo "Hermes shim recreated."
 else
     echo "No git repository found; falling back to fresh clone."
     exit 1
@@ -217,15 +315,21 @@ if command -v uv &>/dev/null; then
     uv venv venv --python 3.11 2>&1
     venv_python="$HERMES_DIR/venv/bin/python"
     "$venv_python" -m ensurepip --upgrade 2>&1 || true
-    UV_PROJECT_ENVIRONMENT="$HERMES_DIR/venv" uv sync --extra all --locked 2>&1 || {
-        uv pip install -e ".[all]" 2>&1
-    }
+    # uv sync does not reliably create setuptools entry points.
+    # Always use pip install -e to ensure hermes_cli is available.
+    "$HERMES_DIR/venv/bin/pip" install -e ".[all]" 2>&1
 elif command -v python3 &>/dev/null; then
     python3 -m venv venv 2>&1
     "$HERMES_DIR/venv/bin/python" -m ensurepip --upgrade 2>&1
     "$HERMES_DIR/venv/bin/pip" install -e ".[all]" 2>&1
 else
     echo "ERROR: Neither uv nor python3 available to create venv."
+    exit 1
+fi
+
+# Verify the install actually worked
+if ! "$HERMES_DIR/venv/bin/python" -m hermes_cli.main --version >/dev/null 2>&1; then
+    echo "ERROR: Package install succeeded but hermes_cli module is not importable."
     exit 1
 fi
 

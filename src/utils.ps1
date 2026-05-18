@@ -228,28 +228,54 @@ function Invoke-CommandSafe {
 
             $process = New-Object System.Diagnostics.Process
             $process.StartInfo = $psi
-            [void]$process.Start()
 
-            if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            $stdoutBuilder = New-Object System.Text.StringBuilder
+            $stderrBuilder = New-Object System.Text.StringBuilder
+
+            $process.add_OutputDataReceived({
+                if ($EventArgs.Data -ne $null) {
+                    [void]$stdoutBuilder.AppendLine($EventArgs.Data)
+                }
+            })
+            $process.add_ErrorDataReceived({
+                if ($EventArgs.Data -ne $null) {
+                    [void]$stderrBuilder.AppendLine($EventArgs.Data)
+                }
+            })
+
+            [void]$process.Start()
+            $process.BeginOutputReadLine()
+            $process.BeginErrorReadLine()
+
+            $completed = $process.WaitForExit($TimeoutSeconds * 1000)
+
+            if (-not $completed) {
                 try {
                     $process.Kill()
                 }
                 catch {
                 }
 
+                # Give async handlers a moment to flush whatever they already received
+                Start-Sleep -Milliseconds 300
+
+                $partialOutput = ConvertTo-GuiSafeText (($stdoutBuilder.ToString(), $stderrBuilder.ToString() | Where-Object { $_ }) -join [Environment]::NewLine)
                 $message = "Command timed out after $TimeoutSeconds seconds."
                 Write-Log -Message "$commandLabel => $message" -Level 'ERROR' -LogFile $LogFile | Out-Null
                 return [pscustomobject]@{
                     Status   = 'Error'
                     Message  = $message
-                    Details  = $message
+                    Details  = if ($partialOutput) { "$message`nPartial output:`n$partialOutput" } else { $message }
                     ExitCode = 124
-                    Output   = $null
+                    Output   = $partialOutput
                 }
             }
 
-            $stdout = $process.StandardOutput.ReadToEnd()
-            $stderr = $process.StandardError.ReadToEnd()
+            # Brief wait so any trailing async events can flush
+            Start-Sleep -Milliseconds 300
+
+            $stdout = $stdoutBuilder.ToString()
+            $stderr = $stderrBuilder.ToString()
             $exitCode = $process.ExitCode
             $textOutput = ConvertTo-GuiSafeText (($stdout, $stderr | Where-Object { $_ }) -join [Environment]::NewLine)
 
