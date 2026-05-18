@@ -99,12 +99,12 @@ function Get-WindowsBootLaunchStatus {
     try {
         $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
         if ($task.State -eq 'Ready') {
-            return Format-StatusResult -Name 'Boot Launch' -Status 'Enabled' -Message 'hermes-agent-windows launches on Windows boot.' -Details 'Task Scheduler entry exists and is active.'
+            return Format-StatusResult -Name 'Boot Launch' -Status 'Running' -Message 'hermes-agent-windows launches on Windows boot.' -Details 'Task Scheduler entry exists and is active.'
         }
-        return Format-StatusResult -Name 'Boot Launch' -Status 'Disabled' -Message 'hermes-agent-windows boot task exists but is not enabled.' -Details 'The scheduled task may be disabled.'
+        return Format-StatusResult -Name 'Boot Launch' -Status 'Stopped' -Message 'hermes-agent-windows boot task exists but is not enabled.' -Details 'The scheduled task may be disabled.'
     }
     catch {
-        return Format-StatusResult -Name 'Boot Launch' -Status 'Disabled' -Message 'hermes-agent-windows does not launch on boot.' -Details 'No scheduled task found. Toggle on to create one.'
+        return Format-StatusResult -Name 'Boot Launch' -Status 'Missing' -Message 'hermes-agent-windows does not launch on boot.' -Details 'No scheduled task found. Toggle on to create one.'
     }
 }
 
@@ -136,11 +136,11 @@ Start-hermes-agent-windowsGui
         if ($Enable) {
             Unregister-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
             $task = Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
-            return Format-StatusResult -Name 'Boot Launch' -Status 'Enabled' -Message 'hermes-agent-windows will auto-launch on Windows login.' -Details "Task: $taskName"
+            return Format-StatusResult -Name 'Boot Launch' -Status 'Running' -Message 'hermes-agent-windows will auto-launch on Windows login.' -Details "Task: $taskName"
         }
         else {
             Unregister-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Confirm:$false | Out-Null
-            return Format-StatusResult -Name 'Boot Launch' -Status 'Disabled' -Message 'hermes-agent-windows will no longer auto-launch on boot.' -Details "Task removed."
+            return Format-StatusResult -Name 'Boot Launch' -Status 'Missing' -Message 'hermes-agent-windows will no longer auto-launch on boot.' -Details "Task removed."
         }
     }
     catch {

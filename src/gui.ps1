@@ -658,10 +658,10 @@ function Start-hermes-agent-windowsGui {
         }
 
         # Sync boot-launch button label from status check
-        if ($Summary.BootLaunch.Status -eq 'Enabled') {
+        if ($Summary.BootLaunch.Status -eq 'Running') {
             $controls.BootLaunchButton.Content = 'Boot Launch: ON'
         }
-        elseif ($Summary.BootLaunch.Status -eq 'Disabled') {
+        elseif ($Summary.BootLaunch.Status -eq 'Stopped' -or $Summary.BootLaunch.Status -eq 'Missing') {
             $controls.BootLaunchButton.Content = 'Boot Launch: OFF'
         }
         else {

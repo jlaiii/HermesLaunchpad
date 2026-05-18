@@ -215,6 +215,9 @@ function Invoke-CommandSafe {
                 return $Value
             }
 
+            $stdoutFile = [System.IO.Path]::GetTempFileName()
+            $stderrFile = [System.IO.Path]::GetTempFileName()
+
             $psi = New-Object System.Diagnostics.ProcessStartInfo
             $psi.FileName = $FilePath
             $psi.Arguments = (($Arguments | ForEach-Object { & $quoteArgument $_ }) -join ' ')
@@ -228,38 +231,20 @@ function Invoke-CommandSafe {
 
             $process = New-Object System.Diagnostics.Process
             $process.StartInfo = $psi
-
-            $stdoutBuilder = New-Object System.Text.StringBuilder
-            $stderrBuilder = New-Object System.Text.StringBuilder
-
-            $process.add_OutputDataReceived({
-                if ($EventArgs.Data -ne $null) {
-                    [void]$stdoutBuilder.AppendLine($EventArgs.Data)
-                }
-            })
-            $process.add_ErrorDataReceived({
-                if ($EventArgs.Data -ne $null) {
-                    [void]$stderrBuilder.AppendLine($EventArgs.Data)
-                }
-            })
-
             [void]$process.Start()
-            $process.BeginOutputReadLine()
-            $process.BeginErrorReadLine()
+
+            # Read streams asynchronously in background threads to avoid deadlock
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
 
             $completed = $process.WaitForExit($TimeoutSeconds * 1000)
 
             if (-not $completed) {
-                try {
-                    $process.Kill()
-                }
-                catch {
-                }
+                try { $process.Kill() } catch { }
+                try { $stdoutTask.Wait(500) } catch { }
+                try { $stderrTask.Wait(500) } catch { }
 
-                # Give async handlers a moment to flush whatever they already received
-                Start-Sleep -Milliseconds 300
-
-                $partialOutput = ConvertTo-GuiSafeText (($stdoutBuilder.ToString(), $stderrBuilder.ToString() | Where-Object { $_ }) -join [Environment]::NewLine)
+                $partialOutput = ConvertTo-GuiSafeText ((try { $stdoutTask.Result } catch { '' }), (try { $stderrTask.Result } catch { '' }) | Where-Object { $_ }) -join [Environment]::NewLine
                 $message = "Command timed out after $TimeoutSeconds seconds."
                 Write-Log -Message "$commandLabel => $message" -Level 'ERROR' -LogFile $LogFile | Out-Null
                 return [pscustomobject]@{
@@ -271,11 +256,12 @@ function Invoke-CommandSafe {
                 }
             }
 
-            # Brief wait so any trailing async events can flush
-            Start-Sleep -Milliseconds 300
+            # Wait for async reads to finish (they usually complete quickly after process exits)
+            try { $stdoutTask.Wait(2000) } catch { }
+            try { $stderrTask.Wait(2000) } catch { }
 
-            $stdout = $stdoutBuilder.ToString()
-            $stderr = $stderrBuilder.ToString()
+            $stdout = try { $stdoutTask.Result } catch { '' }
+            $stderr = try { $stderrTask.Result } catch { '' }
             $exitCode = $process.ExitCode
             $textOutput = ConvertTo-GuiSafeText (($stdout, $stderr | Where-Object { $_ }) -join [Environment]::NewLine)
 
