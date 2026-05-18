@@ -147,11 +147,12 @@ if command -v uv &>/dev/null; then
     uv venv venv --python 3.11 2>&1
     venv_python="$HERMES_DIR/venv/bin/python"
     "$venv_python" -m ensurepip --upgrade 2>&1 || true
-    "$HERMES_DIR/venv/bin/pip" install -e ".[all]" 2>&1
+    "$venv_python" -m pip install -e ".[all]" 2>&1
 elif command -v python3 &>/dev/null; then
     python3 -m venv venv 2>&1
-    "$HERMES_DIR/venv/bin/python" -m ensurepip --upgrade 2>&1
-    "$HERMES_DIR/venv/bin/pip" install -e ".[all]" 2>&1
+    venv_python="$HERMES_DIR/venv/bin/python"
+    "$venv_python" -m ensurepip --upgrade 2>&1
+    "$venv_python" -m pip install -e ".[all]" 2>&1
 else
     echo "ERROR: Neither uv nor python3 available to create venv."
     exit 1
@@ -219,19 +220,15 @@ if [ -d "$HOME/.hermes/hermes-agent/.git" ]; then
     fi
 
     # uv venv creates venvs without pip — bootstrap it with ensurepip
-    if [ ! -x "$venv_bin/pip" ]; then
+    if ! "$venv_python" -m pip --version >/dev/null 2>&1; then
         echo "Bootstrapping pip into venv..."
         "$venv_python" -m ensurepip --upgrade 2>&1
     fi
 
-    # Install updated package with venv pip
-    if [ -x "$venv_bin/pip" ]; then
-        "$venv_bin/pip" install -e . 2>&1
-        pip_exit=$?
-    else
-        echo "ERROR: pip not available even after ensurepip"
-        exit 1
-    fi
+    # Install updated package. Always use python -m pip because uv venvs
+    # may only create pip3, not a pip symlink.
+    "$venv_python" -m pip install -e . 2>&1
+    pip_exit=$?
 
     if [ $pip_exit -eq 0 ]; then
         echo "In-place update complete."
@@ -317,11 +314,12 @@ if command -v uv &>/dev/null; then
     "$venv_python" -m ensurepip --upgrade 2>&1 || true
     # uv sync does not reliably create setuptools entry points.
     # Always use pip install -e to ensure hermes_cli is available.
-    "$HERMES_DIR/venv/bin/pip" install -e ".[all]" 2>&1
+    "$venv_python" -m pip install -e ".[all]" 2>&1
 elif command -v python3 &>/dev/null; then
     python3 -m venv venv 2>&1
-    "$HERMES_DIR/venv/bin/python" -m ensurepip --upgrade 2>&1
-    "$HERMES_DIR/venv/bin/pip" install -e ".[all]" 2>&1
+    venv_python="$HERMES_DIR/venv/bin/python"
+    "$venv_python" -m ensurepip --upgrade 2>&1
+    "$venv_python" -m pip install -e ".[all]" 2>&1
 else
     echo "ERROR: Neither uv nor python3 available to create venv."
     exit 1
