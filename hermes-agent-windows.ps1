@@ -22,7 +22,7 @@ function Start-LauncherElevated {
 
     $launcher = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { (Get-Command pwsh.exe).Source } else { (Get-Command powershell.exe).Source }
     $arguments = @('-NoProfile')
-    if ($RequireSta) {
+    if ($RequireSta -and $launcher -notmatch 'pwsh\.exe$') {
         $arguments += '-STA'
     }
     $arguments += @('-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
@@ -39,7 +39,12 @@ if ($isWindowsHost -and (-not (Test-LauncherAdmin))) {
 
 if ($isWindowsHost -and $currentApartment -ne 'STA') {
     $launcher = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { (Get-Command pwsh.exe).Source } else { (Get-Command powershell.exe).Source }
-    Start-Process -FilePath $launcher -ArgumentList @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath) -WorkingDirectory (Split-Path -Parent $PSCommandPath)
+    $arguments = @('-NoProfile')
+    if ($launcher -notmatch 'pwsh\.exe$') {
+        $arguments += '-STA'
+    }
+    $arguments += @('-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
+    Start-Process -FilePath $launcher -ArgumentList $arguments -WorkingDirectory (Split-Path -Parent $PSCommandPath)
     return
 }
 
@@ -57,6 +62,7 @@ if (-not (Test-Path (Join-Path $global:HermesAgentWindowsRoot 'src\utils.ps1')))
 . (Join-Path $global:HermesAgentWindowsRoot 'src\ollama-manager.ps1')
 . (Join-Path $global:HermesAgentWindowsRoot 'src\hermes-manager.ps1')
 . (Join-Path $global:HermesAgentWindowsRoot 'src\app-manager.ps1')
+. (Join-Path $global:HermesAgentWindowsRoot 'src\bot-manager.ps1')
 . (Join-Path $global:HermesAgentWindowsRoot 'src\installer.ps1')
 . (Join-Path $global:HermesAgentWindowsRoot 'src\gui.ps1')
 

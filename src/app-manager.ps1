@@ -1,4 +1,4 @@
-if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
+﻿if (-not (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot 'utils.ps1')
 }
 
@@ -118,9 +118,10 @@ function Set-WindowsBootLaunch {
     $launcher = Join-Path $projectRoot 'launch-gui.ps1'
     # Ensure a launcher script exists (lightweight wrapper that dot-sources everything)
     if (-not (Test-Path $launcher)) {
+        $safePath = $projectRoot -replace "'", "''"
         @"
-# hermes-agent-windows GUI launcher — auto-generated
-`$PSScriptRoot = '$(($projectRoot -replace "'","'''))'
+# hermes-agent-windows GUI launcher - auto-generated
+`$PSScriptRoot = '$safePath'
 . (Join-Path `$PSScriptRoot 'src' 'gui.ps1')
 Start-hermes-agent-windowsGui
 "@ | Set-Content -Path $launcher -Encoding UTF8 -Force
@@ -148,7 +149,7 @@ Start-hermes-agent-windowsGui
 }
 
 function Get-WslDiskUsage {
-    $result = Invoke-WslShell -Command 'df -h "$(df | awk "NR==2{print \$6}")" 2>/dev/null || df -h / 2>/dev/null' -TimeoutSeconds 30
+    $result = Invoke-WslShell -Command 'df -h / 2>/dev/null' -TimeoutSeconds 10
     if ($result.Status -eq 'Success') {
         $lines = $result.Details -split "`r?`n" | Where-Object { $_.Trim() }
         $mainLine = $lines | Where-Object { $_ -match '(/$|/dev/root)' } | Select-Object -First 1

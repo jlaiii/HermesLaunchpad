@@ -397,6 +397,59 @@ function Start-hermes-agent-windowsGui {
                     </WrapPanel>
                 </Border>
             </TabItem>
+            <TabItem Header="Bots" ToolTip="Telegram and Discord bot configuration.">
+                <Border Background="#171B20" BorderBrush="#252A32" BorderThickness="1" CornerRadius="0,0,10,10" Padding="12" Margin="0,-1,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <!-- Telegram -->
+                        <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                            <TextBlock Text="Telegram Bot" FontSize="13" FontWeight="SemiBold" Foreground="#3B82F6" Margin="0,0,0,8" />
+                            <DockPanel Margin="0,0,0,6">
+                                <TextBlock Text="Bot Token" Width="70" VerticalAlignment="Center" Foreground="#8B919D" FontSize="11" />
+                                <PasswordBox x:Name="TelegramTokenBox" Width="320" Height="30"
+                                             ToolTip="Paste your Telegram bot token from @BotFather." />
+                            </DockPanel>
+                            <DockPanel Margin="0,0,0,8">
+                                <TextBlock Text="Chat ID" Width="70" VerticalAlignment="Center" Foreground="#8B919D" FontSize="11" />
+                                <TextBox x:Name="TelegramChatIdBox" Width="320" Height="30"
+                                         ToolTip="Enter the Telegram chat or user ID." />
+                            </DockPanel>
+                            <WrapPanel>
+                                <Button x:Name="SaveTelegramButton" Content="Save Telegram" Width="120" Height="34" Margin="0,0,6,0"
+                                        ToolTip="Save the Telegram bot token and chat ID in WSL." />
+                                <Button x:Name="TestTelegramButton" Content="Test Telegram" Width="120" Height="34" Margin="0,0,6,0"
+                                        ToolTip="Send a test request to verify the Telegram bot token works." />
+                            </WrapPanel>
+                        </StackPanel>
+                        <!-- Discord -->
+                        <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                            <TextBlock Text="Discord Bot" FontSize="13" FontWeight="SemiBold" Foreground="#5865F2" Margin="0,0,0,8" />
+                            <DockPanel Margin="0,0,0,6">
+                                <TextBlock Text="Bot Token" Width="70" VerticalAlignment="Center" Foreground="#8B919D" FontSize="11" />
+                                <PasswordBox x:Name="DiscordTokenBox" Width="320" Height="30"
+                                             ToolTip="Paste your Discord bot token from the Developer Portal." />
+                            </DockPanel>
+                            <DockPanel Margin="0,0,0,8">
+                                <TextBlock Text="Channel ID" Width="70" VerticalAlignment="Center" Foreground="#8B919D" FontSize="11" />
+                                <TextBox x:Name="DiscordChannelIdBox" Width="320" Height="30"
+                                         ToolTip="Enter the Discord channel ID where the bot should operate." />
+                            </DockPanel>
+                            <WrapPanel>
+                                <Button x:Name="SaveDiscordButton" Content="Save Discord" Width="120" Height="34" Margin="0,0,6,0"
+                                        ToolTip="Save the Discord bot token and channel ID in WSL." />
+                                <Button x:Name="TestDiscordButton" Content="Test Discord" Width="120" Height="34" Margin="0,0,6,0"
+                                        ToolTip="Send a test request to verify the Discord bot token works." />
+                            </WrapPanel>
+                        </StackPanel>
+                        <Button x:Name="InstallBotDepsButton" Grid.Column="1" Content="Install Bot Dependencies" Width="180" Height="34"
+                                Margin="8,80,0,0" HorizontalAlignment="Left"
+                                ToolTip="Install python-telegram-bot and discord.py inside the Hermes WSL venv." />
+                    </Grid>
+                </Border>
+            </TabItem>
         </TabControl>
     </Grid>
 </Window>
@@ -482,6 +535,15 @@ function Start-hermes-agent-windowsGui {
         BootLaunchButton    = $window.FindName('BootLaunchButton')
         ExitButton          = $window.FindName('ExitButton')
         GitHubButton        = $window.FindName('GitHubButton')
+        TelegramTokenBox    = $window.FindName('TelegramTokenBox')
+        TelegramChatIdBox   = $window.FindName('TelegramChatIdBox')
+        SaveTelegramButton  = $window.FindName('SaveTelegramButton')
+        TestTelegramButton  = $window.FindName('TestTelegramButton')
+        DiscordTokenBox     = $window.FindName('DiscordTokenBox')
+        DiscordChannelIdBox = $window.FindName('DiscordChannelIdBox')
+        SaveDiscordButton   = $window.FindName('SaveDiscordButton')
+        TestDiscordButton   = $window.FindName('TestDiscordButton')
+        InstallBotDepsButton = $window.FindName('InstallBotDepsButton')
     }
 
     $script:GuiState = @{
@@ -654,6 +716,7 @@ function Start-hermes-agent-windowsGui {
             . (Join-Path $root 'src\ollama-manager.ps1')
             . (Join-Path $root 'src\hermes-manager.ps1')
             . (Join-Path $root 'src\app-manager.ps1')
+            . (Join-Path $root 'src\bot-manager.ps1')
             . (Join-Path $root 'src\installer.ps1')
             & $funcName @funcArgs
         }
@@ -706,6 +769,32 @@ function Start-hermes-agent-windowsGui {
     function Start-TestOllamaCloudJob {
         $model = $controls.OllamaModelBox.Text
         Start-GuiJob -TaskName 'TestOllamaCloud' -FunctionName 'Test-OllamaCloudApi' -FunctionArguments @($model)
+    }
+
+    function Start-SaveTelegramJob {
+        $token = $controls.TelegramTokenBox.Password
+        $chatId = $controls.TelegramChatIdBox.Text
+        Start-GuiJob -TaskName 'SaveTelegram' -FunctionName 'Set-TelegramBotConfig' -FunctionArguments @($token, $chatId)
+    }
+
+    function Start-TestTelegramJob {
+        $token = $controls.TelegramTokenBox.Password
+        Start-GuiJob -TaskName 'TestTelegram' -FunctionName 'Test-TelegramBotApi' -FunctionArguments @($token)
+    }
+
+    function Start-SaveDiscordJob {
+        $token = $controls.DiscordTokenBox.Password
+        $channelId = $controls.DiscordChannelIdBox.Text
+        Start-GuiJob -TaskName 'SaveDiscord' -FunctionName 'Set-DiscordBotConfig' -FunctionArguments @($token, $channelId)
+    }
+
+    function Start-TestDiscordJob {
+        $token = $controls.DiscordTokenBox.Password
+        Start-GuiJob -TaskName 'TestDiscord' -FunctionName 'Test-DiscordBotApi' -FunctionArguments @($token)
+    }
+
+    function Start-InstallBotDepsJob {
+        Start-GuiJob -TaskName 'InstallBotDeps' -FunctionName 'Install-BotDependencies'
     }
 
     function Start-InstallHermesJob {
@@ -804,6 +893,10 @@ function Start-hermes-agent-windowsGui {
                             Add-GuiLogLine "[$taskName] $($result.Message)"
                             Start-StatusCheckJob
                         }
+                        elseif ($taskName -eq 'SaveTelegram' -or $taskName -eq 'TestTelegram' -or $taskName -eq 'SaveDiscord' -or $taskName -eq 'TestDiscord' -or $taskName -eq 'InstallBotDeps') {
+                            $controls.TopStatusText.Text = "$taskName finished with $($result.Status)."
+                            Add-GuiLogLine "[$taskName] $($result.Message)"
+                        }
                         elseif ($taskName -eq 'ToggleBootLaunch') {
                             $controls.TopStatusText.Text = "$taskName finished with $($result.Status)."
                             Add-GuiLogLine "[$taskName] $($result.Message)"
@@ -884,6 +977,21 @@ function Start-hermes-agent-windowsGui {
     })
     $controls.TestOllamaCloudButton.Add_Click({
         Start-TestOllamaCloudJob
+    })
+    $controls.SaveTelegramButton.Add_Click({
+        Start-SaveTelegramJob
+    })
+    $controls.TestTelegramButton.Add_Click({
+        Start-TestTelegramJob
+    })
+    $controls.SaveDiscordButton.Add_Click({
+        Start-SaveDiscordJob
+    })
+    $controls.TestDiscordButton.Add_Click({
+        Start-TestDiscordJob
+    })
+    $controls.InstallBotDepsButton.Add_Click({
+        Start-InstallBotDepsJob
     })
     $controls.InstallHermesButton.Add_Click({
         $choice = [System.Windows.MessageBox]::Show('Install Hermes Agent inside WSL now?', 'hermes-agent-windows', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)

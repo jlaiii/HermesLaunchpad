@@ -84,9 +84,9 @@ function Get-WslDistroList {
             return Format-StatusResult -Name 'WSL Distro' -Status 'Missing' -Message 'No WSL distro is installed.' -Details $details
         }
 
-        $diskResult = Invoke-WslCommand -Arguments @('-e', 'sh', '-lc', 'du -sh / 2>/dev/null || echo unknown') -LogFile $logFile -TimeoutSeconds 30
+        $diskResult = Invoke-WslCommand -Arguments @('-e', 'sh', '-lc', 'df -h / 2>/dev/null || echo unknown') -LogFile $logFile -TimeoutSeconds 10
         if ($diskResult.Status -eq 'Success' -and $diskResult.Details -and $diskResult.Details -notmatch 'unknown') {
-            $diskUsage = ($diskResult.Details -split "`r?`n" | Where-Object { $_ -match '^\d' } | Select-Object -First 1).Trim()
+            $diskUsage = ($diskResult.Details -split "`r?`n" | Where-Object { $_ -match '^/dev/' } | Select-Object -First 1).Trim()
             if ($diskUsage) {
                 $details = "$details`nDisk usage: $diskUsage"
             }

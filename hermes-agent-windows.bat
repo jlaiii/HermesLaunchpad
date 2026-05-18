@@ -44,14 +44,16 @@ if not "%ERRORLEVEL%"=="0" (
 where pwsh.exe >nul 2>nul
 if %ERRORLEVEL% EQU 0 (
     set "PS_EXE=pwsh.exe"
+    set "PS_ARGS=-NoProfile -ExecutionPolicy Bypass"
 ) else (
     set "PS_EXE=powershell.exe"
+    set "PS_ARGS=-NoProfile -STA -ExecutionPolicy Bypass"
 )
 
 echo Launching hermes-agent-windows with %PS_EXE%...
 echo.
 
-%PS_EXE% -NoProfile -STA -ExecutionPolicy Bypass -File "%LAUNCH_SCRIPT%"
+%PS_EXE% %PS_ARGS% -File "%LAUNCH_SCRIPT%"
 set "EXIT_CODE=%ERRORLEVEL%"
 
 if not "%EXIT_CODE%"=="0" (
