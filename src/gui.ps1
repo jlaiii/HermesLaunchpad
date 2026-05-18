@@ -443,10 +443,10 @@ function Start-hermes-agent-windowsGui {
                                 <Button x:Name="TestDiscordButton" Content="Test Discord" Width="120" Height="34" Margin="0,0,6,0"
                                         ToolTip="Send a test request to verify the Discord bot token works." />
                             </WrapPanel>
+                            <Button x:Name="InstallBotDepsButton" Content="Install Bot Dependencies" Width="180" Height="34"
+                                    Margin="0,12,0,0" HorizontalAlignment="Left"
+                                    ToolTip="Install python-telegram-bot and discord.py inside the Hermes WSL venv." />
                         </StackPanel>
-                        <Button x:Name="InstallBotDepsButton" Grid.Column="1" Content="Install Bot Dependencies" Width="180" Height="34"
-                                Margin="8,80,0,0" HorizontalAlignment="Left"
-                                ToolTip="Install python-telegram-bot and discord.py inside the Hermes WSL venv." />
                     </Grid>
                 </Border>
             </TabItem>
