@@ -72,6 +72,13 @@ Write-Host 'Smart Windows Setup Tool for Hermes Agent' -ForegroundColor Cyan
 Write-Host '========================================================' -ForegroundColor Cyan
 Write-Log -Message 'hermes-agent-windows launcher started.' -Level 'INFO' -LogFile (Get-LogFilePath -Kind 'app') | Out-Null
 
+# Startup diagnostics
+$osInfo = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+$powershellEdition = $PSVersionTable.PSEdition
+$powershellVersion = $PSVersionTable.PSVersion
+$isAdmin = Test-LauncherAdmin
+Write-Log -Message "Startup diagnostics | OS: $($osInfo.Caption) $($osInfo.Version) | PS: $powershellEdition $powershellVersion | Admin: $isAdmin | STA: $([System.Threading.Thread]::CurrentThread.ApartmentState) | Root: $global:HermesAgentWindowsRoot" -Level 'INFO' -LogFile (Get-LogFilePath -Kind 'app') | Out-Null
+
 try {
     Start-hermes-agent-windowsGui
 }

@@ -35,6 +35,17 @@ function Get-ActiveLogFile {
     return (Get-LogFilePath -Kind 'app')
 }
 
+function Get-CallerName {
+    $callStack = Get-PSCallStack
+    if ($callStack.Count -ge 3) {
+        $caller = $callStack[2]
+        if ($caller.FunctionName -and $caller.FunctionName -ne '<ScriptBlock>') {
+            return $caller.FunctionName
+        }
+    }
+    return 'script'
+}
+
 function ConvertTo-GuiSafeText {
     param(
         [Parameter(ValueFromPipeline = $true)]
@@ -90,11 +101,13 @@ function Write-Log {
         [string]$Message,
         [ValidateSet('INFO', 'SUCCESS', 'WARN', 'ERROR', 'DEBUG')]
         [string]$Level = 'INFO',
-        [string]$LogFile = (Get-ActiveLogFile)
+        [string]$LogFile = (Get-ActiveLogFile),
+        [string]$Caller = (Get-CallerName)
     )
 
     $timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    $line = "[$timestamp][$Level] $Message"
+    $prefix = if ($Caller -and $Caller -ne 'Write-Log') { "[$Caller] " } else { '' }
+    $line = "[$timestamp][$Level] $prefix$Message"
     $safeLine = ConvertTo-GuiSafeText $line
 
     switch ($Level) {
@@ -118,6 +131,40 @@ function Write-Log {
     }
 
     return $safeLine
+}
+
+function Write-ErrorLog {
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [string]$Context = '',
+        [string]$LogFile = (Get-ActiveLogFile)
+    )
+
+    $caller = Get-CallerName
+    $ex = $ErrorRecord.Exception
+    $scriptName = $ErrorRecord.InvocationInfo.ScriptName
+    $lineNumber = $ErrorRecord.InvocationInfo.ScriptLineNumber
+    $offset = $ErrorRecord.InvocationInfo.OffsetInLine
+
+    $contextSuffix = if ($Context) { " | Context: $Context" } else { '' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("Exception in $caller$contextSuffix")
+    $lines.Add("  Type: $($ex.GetType().FullName)")
+    $lines.Add("  Message: $($ex.Message)")
+    $lines.Add("  Location: ${scriptName}:${lineNumber}:${offset}")
+
+    if ($ex.StackTrace) {
+        $trimmedStack = ($ex.StackTrace -split "`r?`n" | Select-Object -First 5) -join "`n  "
+        $lines.Add("  StackTrace: $trimmedStack")
+    }
+
+    if ($ex.InnerException) {
+        $lines.Add("  InnerException: $($ex.InnerException.Message)")
+    }
+
+    $fullMessage = $lines -join "`n"
+    Write-Log -Message $fullMessage -Level 'ERROR' -LogFile $LogFile -Caller $caller | Out-Null
 }
 
 function Write-AppLog {
@@ -283,6 +330,7 @@ function Invoke-CommandSafe {
                 }
             }
 
+            Write-Log -Message "Command exited with code $exitCode`: $commandLabel`nOutput: $textOutput" -Level 'WARN' -LogFile $LogFile | Out-Null
             return [pscustomobject]@{
                 Status   = 'Error'
                 Message  = 'Command returned a non-zero exit code.'
@@ -327,6 +375,7 @@ function Invoke-CommandSafe {
             }
         }
 
+        Write-Log -Message "Command exited with code $exitCode`: $commandLabel`nOutput: $textOutput" -Level 'WARN' -LogFile $LogFile | Out-Null
         $result = [pscustomobject]@{
             Status   = 'Error'
             Message  = 'Command returned a non-zero exit code.'
@@ -346,12 +395,11 @@ function Invoke-CommandSafe {
             Set-Location $previousLocation
         }
 
-        $message = $_.Exception.Message
-        Write-Log -Message "Command failed: $commandLabel :: $message" -Level 'ERROR' -LogFile $LogFile | Out-Null
+        Write-ErrorLog -ErrorRecord $_ -Context "Command: $commandLabel" -LogFile $LogFile
         return [pscustomobject]@{
             Status   = 'Error'
             Message  = 'Command failed.'
-            Details  = $message
+            Details  = $_.Exception.Message
             ExitCode = 1
             Output   = $null
         }
