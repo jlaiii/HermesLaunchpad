@@ -183,7 +183,8 @@ try {
         'src/ollama-manager.ps1',
         'src/hermes-manager.ps1',
         'src/app-manager.ps1',
-        'src/utils.ps1'
+        'src/utils.ps1',
+        'src/bot-manager.ps1'
     )
 
     $hasPlaceholderBaseUrl = ($baseUrl -match 'example\\.com')
@@ -231,7 +232,10 @@ try {
     }
 
     $launcherExe = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { (Get-Command pwsh.exe).Source } else { (Get-Command powershell.exe).Source }
-    $launchArgs = @('-STA', '-ExecutionPolicy', 'Bypass', '-File', $launchScript)
+    $launchArgs = @('-ExecutionPolicy', 'Bypass', '-File', $launchScript)
+    if ($launcherExe -notmatch 'pwsh\.exe$') {
+        $launchArgs = @('-STA') + $launchArgs
+    }
 
     Add-Content -Path $global:HermesAgentWindowsLogPath -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][INFO] Launching main app using $launcherExe" -Encoding UTF8
     Start-Process -FilePath $launcherExe -ArgumentList $launchArgs -WorkingDirectory $installerRoot | Out-Null
