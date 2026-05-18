@@ -593,15 +593,43 @@ function Open-HermesGateway {
 
     $command = @'
 mkdir -p "$HOME/.hermes/logs"
-if ! curl -fsS --max-time 5 http://127.0.0.1:9119 >/dev/null 2>&1; then
-  hermes dashboard --stop >/dev/null 2>&1 || true
-  nohup hermes dashboard --host 127.0.0.1 --port 9119 --no-open --skip-build > "$HOME/.hermes/logs/dashboard.log" 2>&1 &
-  sleep 8
+if curl -fsS --max-time 3 http://127.0.0.1:9119 >/dev/null 2>&1; then
+  echo "Dashboard already running at http://127.0.0.1:9119"
+  exit 0
 fi
-curl -fsS --max-time 5 http://127.0.0.1:9119 >/dev/null 2>&1
-echo "Hermes dashboard is reachable inside WSL at http://127.0.0.1:9119"
+
+# Stop any stale dashboard process safely (avoid pkill -f / hermes dashboard --stop,
+# which match the full command line and would kill this bash process itself).
+ps -eo pid=,comm=,args= | awk '$2 !~ /^(bash|sh|awk|ps)$/ && $0 ~ /hermes.*dashboard/ {print $1}' | while read pid; do
+  [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+done
+sleep 2
+
+# Start the dashboard (auto-builds web UI if web_dist is missing)
+nohup hermes dashboard --host 127.0.0.1 --port 9119 --no-open > "$HOME/.hermes/logs/dashboard.log" 2>&1 &
+echo "Started dashboard (building web UI if needed — this may take 2-5 minutes)"
+
+# Poll for readiness (up to 6 minutes)
+for i in $(seq 1 72); do
+  sleep 5
+  if curl -fsS --max-time 3 http://127.0.0.1:9119 >/dev/null 2>&1; then
+    echo "Dashboard is reachable after ${i} attempts"
+    exit 0
+  fi
+  # Show last progress line from log
+  tail -n 1 "$HOME/.hermes/logs/dashboard.log" 2>/dev/null || true
+done
+
+# Final check
+if curl -fsS --max-time 5 http://127.0.0.1:9119 >/dev/null 2>&1; then
+  echo "Hermes dashboard is reachable inside WSL at http://127.0.0.1:9119"
+  exit 0
+fi
+
+echo "ERROR: Dashboard did not become reachable after 6 minutes. Check log: $HOME/.hermes/logs/dashboard.log"
+exit 1
 '@
-    $dashboard = Invoke-HermesWslCommand -Command $command -AsAdminUser -TimeoutSeconds 120
+    $dashboard = Invoke-HermesWslCommand -Command $command -AsAdminUser -TimeoutSeconds 420
     if ($dashboard.Status -ne 'Success') {
         return Format-StatusResult -Name 'Open Hermes Dashboard' -Status 'Error' -Message 'Hermes dashboard did not become reachable inside WSL.' -Details "Log: /home/admin/.hermes/logs/dashboard.log`n$($dashboard.Details)" -ExitCode $dashboard.ExitCode
     }
