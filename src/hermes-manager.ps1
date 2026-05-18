@@ -642,7 +642,7 @@ function Open-HermesConfigFolder {
 }
 
 function Get-HermesReleaseCachePath {
-    return Join-Path (Get-ProjectRoot) 'version-cache.json'
+    return Join-Path (Get-ProjectRoot) 'hermes-release-cache.json'
 }
 
 function Get-LatestHermesReleaseVersion {
@@ -703,43 +703,45 @@ function Get-LatestHermesReleaseVersion {
 }
 
 function Get-HermesUpdateStatus {
-    $installed = Get-HermesVersion
-    $latest = Get-LatestHermesReleaseVersion
-
-    if ($installed.Status -ne 'Installed') {
+    if (-not (Test-HermesInstalled)) {
         return Format-StatusResult -Name 'Hermes Update' -Status 'Missing' -Message 'Hermes Agent is not installed in WSL.' -Details 'Install Hermes Agent before checking for updates.'
     }
 
-    $versionText = ''
-    if ($installed.Details -match '(?:version[v]?[\s:]?)?(\d+\.\d+(?:\.\d+)?)') {
-        $versionText = $Matches[1]
+    # Compare git commits for a reliable update check. Version strings in the
+    # codebase and GitHub release tags may diverge (e.g. tag = 2026.5.16,
+    # hermes --version = 0.14.0), so comparing commits is the only accurate way.
+    $localCommitResult = Invoke-HermesWslCommand -Command 'cd "$HOME/.hermes/hermes-agent" 2>/dev/null && git rev-parse HEAD 2>/dev/null || echo "NO_GIT"' -AsAdminUser -TimeoutSeconds 30
+    if ($localCommitResult.Status -ne 'Success' -or $localCommitResult.Details -match 'NO_GIT') {
+        return Format-StatusResult -Name 'Hermes Update' -Status 'Unknown' -Message 'Cannot check for updates: no git repository found.' -Details 'Hermes may have been installed without git cloning.'
     }
 
-    if (-not $versionText -and $installed.Message -match '(\d+\.\d+(?:\.\d+)?)') {
-        $versionText = $Matches[1]
+    $localCommit = ($localCommitResult.Details -split "`r?`n" | Select-Object -First 1).Trim()
+
+    $remoteCommitResult = Invoke-HermesWslCommand -Command 'cd "$HOME/.hermes/hermes-agent" 2>/dev/null && git ls-remote --heads origin main 2>/dev/null | awk ''{print $1}'' || echo "NO_REMOTE"' -AsAdminUser -TimeoutSeconds 30
+    if ($remoteCommitResult.Status -ne 'Success' -or $remoteCommitResult.Details -match 'NO_REMOTE') {
+        return Format-StatusResult -Name 'Hermes Update' -Status 'Unknown' -Message 'Could not reach GitHub to check for updates.' -Details 'Network may be unavailable or the git remote is misconfigured.'
     }
 
-    if (-not $versionText) {
-        $versionText = '0.0.0'
+    $remoteCommit = ($remoteCommitResult.Details -split "`r?`n" | Select-Object -First 1).Trim()
+
+    if ($localCommit -eq $remoteCommit) {
+        $short = if ($localCommit.Length -ge 7) { $localCommit.Substring(0, 7) } else { $localCommit }
+        return Format-StatusResult -Name 'Hermes Update' -Status 'Installed' -Message 'Hermes is up to date.' -Details "Commit: $short"
     }
 
-    if ($latest.Status -ne 'Installed') {
-        return Format-StatusResult -Name 'Hermes Update' -Status 'Unknown' -Message 'Hermes Agent installed, but could not reach GitHub.' -Details "$($installed.Message)`n$($latest.Message)"
+    $shortLocal = if ($localCommit.Length -ge 7) { $localCommit.Substring(0, 7) } else { $localCommit }
+    $shortRemote = if ($remoteCommit.Length -ge 7) { $remoteCommit.Substring(0, 7) } else { $remoteCommit }
+
+    # Try to count commits behind (requires fetch, which may fail on shallow clones)
+    $behindResult = Invoke-HermesWslCommand -Command 'cd "$HOME/.hermes/hermes-agent" && git fetch origin --depth=1 2>/dev/null; count=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0); echo "$count"' -AsAdminUser -TimeoutSeconds 60
+    $behindCount = 0
+    if ($behindResult.Status -eq 'Success') {
+        $behindLine = ($behindResult.Details -split "`r?`n" | Select-Object -First 1).Trim()
+        [int]::TryParse($behindLine, [ref]$behindCount) | Out-Null
     }
 
-    try {
-        $currentObj = [version]$versionText
-        $latestObj = [version]$latest.Version
-
-        if ($latestObj -gt $currentObj) {
-            return Format-StatusResult -Name 'Hermes Update' -Status 'Needs Update' -Message "Update available: v$($latest.Version) (installed: v$versionText)" -Details "A newer release is on GitHub. Click Update Hermes Agent to upgrade."
-        }
-
-        return Format-StatusResult -Name 'Hermes Update' -Status 'Installed' -Message "Hermes is up to date (v$versionText)" -Details "Latest: v$($latest.Version)"
-    }
-    catch {
-        return Format-StatusResult -Name 'Hermes Update' -Status 'Unknown' -Message "Hermes installed version: v$versionText | latest: v$($latest.Version)" -Details "Version comparison failed. Check manually if needed."
-    }
+    $message = if ($behindCount -gt 0) { "Update available ($behindCount commits behind)" } else { 'Update available' }
+    return Format-StatusResult -Name 'Hermes Update' -Status 'Needs Update' -Message $message -Details "Local: $shortLocal | Remote: $shortRemote"
 }
 
 function Get-HermesAgentWindowsUpdateInfo {
